@@ -6,11 +6,14 @@ import re
 import argparse
 import random
 import pysam
+from tempfile import TemporaryDirectory
 
 
 R1_ORIENTATION_FORWARD = 'forward'
 R1_ORIENTATION_REVERSE = 'reverse'
 R1_ORIENTATION_UNKNOWN = 'unknown'
+SPADES_TEMP_DIR = "."
+
 
 def lcs(R, T, i, j, mismatch=0, mismatch_threshold=1):
     if mismatch > mismatch_threshold:
@@ -25,13 +28,16 @@ def lcs(R, T, i, j, mismatch=0, mismatch_threshold=1):
                    lcs(R, T, i + 1, j, mismatch, mismatch_threshold),
                    lcs(R, T, i + 1, j + 1, mismatch, mismatch_threshold))
 
+
 class IupacPattern:
-    IUPAC = {'R': 'AG', 'Y': 'CT', 'S': 'GC', 'W': 'AT', 'K': 'GT', 'M': 'AC', 'B': 'CGT', 'V': 'ACG'}
+    IUPAC = {'R': 'AG', 'Y': 'CT', 'S': 'GC', 'W': 'AT',
+             'K': 'GT', 'M': 'AC', 'B': 'CGT', 'V': 'ACG'}
 
     def __init__(self, pattern_list=None, pattern=None, rc=False):
         if pattern_list is None:
             if pattern is None:
-                raise ValueError('One of pattern or pattern_list must be supplied')
+                raise ValueError(
+                    'One of pattern or pattern_list must be supplied')
             pattern_list = [pattern]
         if rc:
             pattern_list = [revcomp(pat) for pat in pattern_list]
@@ -62,11 +68,13 @@ class IupacPattern:
                         search_start = int(len(seq) / 2)
                         search_end = len(seq) - len(pattern) + 1
                 elif search_end is None:
-                    raise ValueError('if search_start is supplied, search_end must also be supplied')
+                    raise ValueError(
+                        'if search_start is supplied, search_end must also be supplied')
 
                 for i in range(search_start, search_end):
                     subseq = seq[i:i + len(pattern)]
-                    score = lcs(pattern, subseq, 0, 0, mismatch_threshold=threshold)
+                    score = lcs(pattern, subseq, 0, 0,
+                                mismatch_threshold=threshold)
                     # keep the last max if coming from 5',
                     # first max if coming from 1/2 thru to the end
                     if (five_prime and score >= max_score) or \
@@ -82,7 +90,8 @@ class IupacPattern:
         return -1, -1, -1, False
 
     def trim_anchor_start(self, seq, mismatch_threshold=1, anchor_remove=False):
-        start, stop, matched, found_anchor = self.find_pattern(seq, threshold=mismatch_threshold, five_prime=True)
+        start, stop, matched, found_anchor = self.find_pattern(
+            seq, threshold=mismatch_threshold, five_prime=True)
         if found_anchor:
             if anchor_remove:
                 return seq[stop:], seq[0:stop], matched, True
@@ -91,7 +100,8 @@ class IupacPattern:
         return seq, '', -1, False
 
     def trim_anchor_end(self, seq, mismatch_threshold=1, anchor_remove=False):
-        start, stop, matched, found_anchor = self.find_pattern(seq, threshold=mismatch_threshold, five_prime=False)
+        start, stop, matched, found_anchor = self.find_pattern(
+            seq, threshold=mismatch_threshold, five_prime=False)
         if found_anchor:
             if anchor_remove:
                 return seq[:start], seq[start:], matched, True
@@ -117,7 +127,9 @@ class IupacPattern:
         else:
             return ''
 
+
 dna_mapping = str.maketrans('ACGTNRYSWKMBV', 'TGCANYRSWMKAT')
+
 
 def get_strand_from_short_read(contig, l_file, tmp_dir, threads=1):
     fafile = f"{tmp_dir}/fafile.fa"
@@ -144,10 +156,10 @@ def get_strand_from_short_read(contig, l_file, tmp_dir, threads=1):
                 aligned_count += 1
                 if not segment.is_reverse:
                     forward_count += 1
-    
+
     if aligned_count == 0:
         return R1_ORIENTATION_UNKNOWN
-    
+
     if forward_count / float(aligned_count) > 0.5:
         return R1_ORIENTATION_FORWARD
     else:
@@ -169,6 +181,7 @@ def revcomp(seq, qual=None):
         qual = qual[::-1]
         return seq, qual
     return seq
+
 
 def trim_contig(contig, term_len, r1_frag, pcr_primer_list):
     term_len = min(term_len, int(len(contig) / 2))
@@ -246,7 +259,8 @@ def trim_contig(contig, term_len, r1_frag, pcr_primer_list):
 
     return contig_trimmed, len_5prime_trimmed, len_3prime_trimmed
 
-def trim_anchor_seqs(seq, anchor_start, anchor_end, anchor_remove=True):  
+
+def trim_anchor_seqs(seq, anchor_start, anchor_end, anchor_remove=True):
     trimmed_5prime_seq = ''
     trimmed_3prime_seq = ''
     is5pDetected = False
@@ -268,11 +282,14 @@ def trim_anchor_seqs(seq, anchor_start, anchor_end, anchor_remove=True):
 
     return seq, trimmed_5prime_seq, trimmed_3prime_seq, is5pDetected, is3pDetected, anchor_start_idx, anchor_end_idx
 
+
 def trim_all_anchors(seq, anchor_start, anchor_end, ht_anchor_start):
-    seq, _, _, is5pDetected, is3pDetected, _, _ = trim_anchor_seqs(seq, anchor_start, anchor_end)
+    seq, _, _, is5pDetected, is3pDetected, _, _ = trim_anchor_seqs(
+        seq, anchor_start, anchor_end)
     if is5pDetected and ht_anchor_start is not None and seq.startswith(ht_anchor_start):
         seq = seq[len(ht_anchor_start):]
     return seq, is5pDetected, is3pDetected
+
 
 def read_fasta(input_filename):
     result = []
@@ -288,6 +305,7 @@ def read_fasta(input_filename):
         result.append(current_entry)
     return result
 
+
 def status(trim5, trim3):
     if trim5 and trim3:
         return "Full-length"
@@ -298,12 +316,14 @@ def status(trim5, trim3):
     else:
         return "Undetected"
 
+
 def rank_status(status):
     if status == "Full-length":
         return 2
     if status == "Undetected":
         return 0
     return 1
+
 
 def update_final_contig(final_contig, final_status, current_contig, current_status):
     final_rank = rank_status(final_status)
@@ -318,6 +338,7 @@ def update_final_contig(final_contig, final_status, current_contig, current_stat
             return final_contig, final_status
         return current_contig, current_status
 
+
 def read_fastq(input_file):
     lines = []
     for line in open(input_file):
@@ -325,9 +346,11 @@ def read_fastq(input_file):
 
     result = []
     for idx in range(int(len(lines)/4)):
-        result.append((lines[4*idx], lines[4*idx + 1], lines[4*idx + 2], lines[4*idx + 3]))
+        result.append((lines[4*idx], lines[4*idx + 1],
+                      lines[4*idx + 2], lines[4*idx + 3]))
 
     return result
+
 
 def write_fastq(entries, output_file):
     with open(output_file, "w") as output_handle:
@@ -335,13 +358,15 @@ def write_fastq(entries, output_file):
             for element in entry:
                 output_handle.write(element + "\n")
 
+
 def sample_fastq(input_file_forward, input_file_reverse, sampling_target, output_file_forward, output_file_reverse):
     forward_entries = read_fastq(input_file_forward)
     reverse_entries = read_fastq(input_file_reverse)
     if sampling_target >= len(forward_entries):
         return (input_file_forward, input_file_reverse)
-    
-    final_entries = random.sample(list([entry for entry in zip(forward_entries, reverse_entries)]), sampling_target)
+
+    final_entries = random.sample(list([entry for entry in zip(
+        forward_entries, reverse_entries)]), sampling_target)
     os.makedirs(os.path.dirname(output_file_forward), exist_ok=True)
     os.makedirs(os.path.dirname(output_file_reverse), exist_ok=True)
     write_fastq([entry[0] for entry in final_entries], output_file_forward)
@@ -350,32 +375,36 @@ def sample_fastq(input_file_forward, input_file_reverse, sampling_target, output
 
 
 def do_assembly_iteration(forward_fq, reverse_fq, threads, sampling_target, pcr_primer, r1_orientation):
-    if sampling_target is not None:
-        forward_fq, reverse_fq = sample_fastq(forward_fq, reverse_fq, sampling_target, f"spades_output/forward.fq", f"spades_output/reverse.fq")
+    with TemporaryDirectory(dir=SPADES_TEMP_DIR) as tmp_dir:
+        if sampling_target is not None:
+            forward_fq, reverse_fq = sample_fastq(
+                forward_fq, reverse_fq, sampling_target, f"{tmp_dir}/forward.fq", f"{tmp_dir}/reverse.fq")
 
-    #
-    # run assembly with spades
-    #
-    command = f"spades.py -k 21,33,55,77,99,127 -t {threads} --careful --sc -o spades_output --phred-offset 33 --disable-gzip-output -1 {forward_fq} -2 {reverse_fq}"
-    retcode = os.system(command) 
+        #
+        # run assembly with spades
+        #
+        command = f"spades.py -k 21,33,55,77,99,127 -t {threads} --careful --sc -o {tmp_dir} --phred-offset 33 --disable-gzip-output -1 {forward_fq} -2 {reverse_fq}"
+        retcode = os.system(command)
 
-    #
-    # read and trim entries
-    #
-    trimmed_contigs = []
-    if retcode == 0 and os.path.isfile("spades_output/contigs.fasta"):
-        for current_contig in read_fasta("spades_output/contigs.fasta"):
-            current_contig, _, _ = trim_contig(current_contig, 40, "CCTACAC", pcr_primer)
-            trimmed_contigs.append(current_contig)
-    
-    if r1_orientation != R1_ORIENTATION_UNKNOWN and len(trimmed_contigs) > 0:
-        contig_orientation = get_strand_from_short_read(trimmed_contigs[0], forward_fq, "spades_output", threads)
-        if contig_orientation != R1_ORIENTATION_UNKNOWN:
-            if contig_orientation != r1_orientation:
-                trimmed_contigs = list([revcomp(trimmed_contig) for trimmed_contig in trimmed_contigs])
+        #
+        # read and trim entries
+        #
+        trimmed_contigs = []
+        if retcode == 0 and os.path.isfile(f"{tmp_dir}/contigs.fasta"):
+            for current_contig in read_fasta(f"{tmp_dir}/contigs.fasta"):
+                current_contig, _, _ = trim_contig(
+                    current_contig, 40, "CCTACAC", pcr_primer)
+                trimmed_contigs.append(current_contig)
 
-    shutil.rmtree("spades_output", ignore_errors=True)
-    return trimmed_contigs
+        if r1_orientation != R1_ORIENTATION_UNKNOWN and len(trimmed_contigs) > 0:
+            contig_orientation = get_strand_from_short_read(
+                trimmed_contigs[0], forward_fq, tmp_dir, threads)
+            if contig_orientation != R1_ORIENTATION_UNKNOWN:
+                if contig_orientation != r1_orientation:
+                    trimmed_contigs = list([revcomp(trimmed_contig)
+                                            for trimmed_contig in trimmed_contigs])
+        return trimmed_contigs
+
 
 def create_solo_barcodes_dict(solo_barcodes, solo_contig_barcodes):
     result = {}
@@ -386,7 +415,8 @@ def create_solo_barcodes_dict(solo_barcodes, solo_contig_barcodes):
 
 
 def spades_assembly(input_dir, output_prefix, pcr_primer, anchor_start, anchor_end, threads, assembly_iterations, sampling_target, solo_barcodes, solo_contig_barcodes, r1_orientation):
-    solo_barcodes_dict = create_solo_barcodes_dict(solo_barcodes, solo_contig_barcodes)    
+    solo_barcodes_dict = create_solo_barcodes_dict(
+        solo_barcodes, solo_contig_barcodes)
     with open(f"{output_prefix}_output.fa", "w") as output_handle, open(f"{output_prefix}_output.csv", "w") as csv_handle:
         for candidate_file in os.listdir(input_dir):
             if candidate_file.endswith("_R1.fastq"):
@@ -401,7 +431,7 @@ def spades_assembly(input_dir, output_prefix, pcr_primer, anchor_start, anchor_e
                         contig_barcode = solo_barcodes_dict[umi]
                 else:
                     contig_barcode = None
-                
+
                 input_forward_fq = f"{input_dir}/{forward_fq}"
                 input_reverse_fq = f"{input_dir}/{reverse_fq}"
 
@@ -419,7 +449,7 @@ def spades_assembly(input_dir, output_prefix, pcr_primer, anchor_start, anchor_e
                         else:
                             contigs.append(contig)
                             contig_counts[contig] = 1
-                contigs.sort(key = lambda x: -contig_counts[x])
+                contigs.sort(key=lambda x: -contig_counts[x])
 
                 #
                 # Find the most frequent Full-length contig
@@ -427,19 +457,23 @@ def spades_assembly(input_dir, output_prefix, pcr_primer, anchor_start, anchor_e
                 (final_contig, final_status) = (None, None)
                 (first_contig, first_status) = (None, None)
                 for current_contig in contigs:
-                    current_contig, trim5, trim3 = trim_all_anchors(current_contig, anchor_start if len(anchor_start) > 0 else None, anchor_end if len(anchor_end) > 0 else None, contig_barcode)
+                    current_contig, trim5, trim3 = trim_all_anchors(current_contig, anchor_start if len(
+                        anchor_start) > 0 else None, anchor_end if len(anchor_end) > 0 else None, contig_barcode)
                     current_status = status(trim5, trim3)
                     if first_contig is None:
-                        (first_contig, first_status) = (current_contig, current_status)
+                        (first_contig, first_status) = (
+                            current_contig, current_status)
                     if current_status == "Full-length":
-                        (final_contig, final_status) = (current_contig, current_status)
+                        (final_contig, final_status) = (
+                            current_contig, current_status)
                         break
                     if current_status != "Undetected" and final_contig is None:
-                        (final_contig, final_status) = (current_contig, current_status)
+                        (final_contig, final_status) = (
+                            current_contig, current_status)
 
                 if final_contig is None:
                     (final_contig, final_status) = (first_contig, first_status)
-                
+
                 if final_contig is not None:
                     output_handle.write(f">{umi}_{len(final_contig)}\n")
                     output_handle.write(final_contig + "\n")
@@ -447,23 +481,35 @@ def spades_assembly(input_dir, output_prefix, pcr_primer, anchor_start, anchor_e
                         effective_read_count = sampling_target
                     else:
                         effective_read_count = read_count
-                    csv_handle.write(f"{umi},{len(final_contig)},{effective_read_count},{final_status}\n")
+                    csv_handle.write(
+                        f"{umi},{len(final_contig)},{effective_read_count},{final_status}\n")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser("Assemble LoopSeq UMI fragments with Spades")
-    parser.add_argument("--pcr-primer", dest="pcr_primer", required=True, help="Nucleotide sequence of PCR primer")
-    parser.add_argument("--anchor-start", dest="anchor_start", required=True, help="Expected start sequence of long read")
-    parser.add_argument("--anchor-end", dest="anchor_end", required=True, help="Expected end sequence of long read")
-    parser.add_argument("--threads", type = int, dest="threads", default = 1, help="Number of threads")
-    parser.add_argument("--assembly-iterations", type=int, dest="assembly_iterations", default = 1, help="Number of iterations to repeat assembly (for Solo)")
-    parser.add_argument("--sampling-target", type=int, dest="sampling_target", default=None, help="Down-sampling target for each assembly iteration (for Solo)")
-    parser.add_argument("--solo-contig-barcodes", dest="solo_contig_barcodes", default="", help="Comma-delimited list of contig barcodes (for Solo)")
-    parser.add_argument("--solo-barcodes", dest="solo_barcodes", default="", help="Comma-delimited list of Solo barcodes")
-    parser.add_argument("--r1-orientation", dest="r1_orientation", default = R1_ORIENTATION_UNKNOWN, help="Orientation of R1 short reads (if known), relative to long read (FORWARD, REVERSE, or UNKNOWN)")
+    parser = argparse.ArgumentParser(
+        "Assemble LoopSeq UMI fragments with Spades")
+    parser.add_argument("--pcr-primer", dest="pcr_primer",
+                        required=True, help="Nucleotide sequence of PCR primer")
+    parser.add_argument("--anchor-start", dest="anchor_start",
+                        required=True, help="Expected start sequence of long read")
+    parser.add_argument("--anchor-end", dest="anchor_end",
+                        required=True, help="Expected end sequence of long read")
+    parser.add_argument("--threads", type=int, dest="threads",
+                        default=1, help="Number of threads")
+    parser.add_argument("--assembly-iterations", type=int, dest="assembly_iterations",
+                        default=1, help="Number of iterations to repeat assembly (for Solo)")
+    parser.add_argument("--sampling-target", type=int, dest="sampling_target",
+                        default=None, help="Down-sampling target for each assembly iteration (for Solo)")
+    parser.add_argument("--solo-contig-barcodes", dest="solo_contig_barcodes",
+                        default="", help="Comma-delimited list of contig barcodes (for Solo)")
+    parser.add_argument("--solo-barcodes", dest="solo_barcodes",
+                        default="", help="Comma-delimited list of Solo barcodes")
+    parser.add_argument("--r1-orientation", dest="r1_orientation", default=R1_ORIENTATION_UNKNOWN,
+                        help="Orientation of R1 short reads (if known), relative to long read (FORWARD, REVERSE, or UNKNOWN)")
     parser.add_argument("input_dir")
     parser.add_argument("output_prefix")
 
     args = parser.parse_args()
 
-    spades_assembly(args.input_dir, args.output_prefix, args.pcr_primer, args.anchor_start, args.anchor_end, args.threads, args.assembly_iterations, args.sampling_target, args.solo_barcodes, args.solo_contig_barcodes, args.r1_orientation)
+    spades_assembly(args.input_dir, args.output_prefix, args.pcr_primer, args.anchor_start, args.anchor_end, args.threads,
+                    args.assembly_iterations, args.sampling_target, args.solo_barcodes, args.solo_contig_barcodes, args.r1_orientation)
